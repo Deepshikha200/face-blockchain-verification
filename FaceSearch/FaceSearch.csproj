@@ -6,6 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+	<Target Name="StartFrontend" BeforeTargets="Build">
+		<Exec Command="start cmd /k &quot;cd /d ..\Frontend &amp;&amp; npm run dev&quot;" />
+	</Target>
+	
   <ItemGroup>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
