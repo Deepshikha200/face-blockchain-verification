@@ -81,35 +81,87 @@ export const App: React.FC = () => {
     }
   };
 
-  // Helper to test no-face image error validation
+  // Helper to test no-face image error validation (back of person / no face)
   const triggerNoFaceImageTest = () => {
     const canvas = document.createElement('canvas');
     canvas.width = 320;
     canvas.height = 240;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Blue sky gradient
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, 140);
-      skyGrad.addColorStop(0, '#0284c7');
-      skyGrad.addColorStop(1, '#7dd3fc');
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, 320, 140);
+      // Room background
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(0, 0, 320, 240);
 
-      // Green grass landscape
-      const grassGrad = ctx.createLinearGradient(0, 140, 0, 240);
-      grassGrad.addColorStop(0, '#15803d');
-      grassGrad.addColorStop(1, '#166534');
-      ctx.fillStyle = grassGrad;
-      ctx.fillRect(0, 140, 320, 100);
+      // Back-facing person: Torso / jacket
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.ellipse(160, 220, 85, 50, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Back of head (hair only, no facial features)
+      ctx.fillStyle = '#1c1917';
+      ctx.beginPath();
+      ctx.ellipse(160, 110, 42, 54, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     canvas.toBlob((blob) => {
       if (blob) {
-        const noFaceFile = new File([blob], 'scenery_no_face.jpg', { type: 'image/jpeg' });
+        const noFaceFile = new File([blob], 'back_facing_person_no_face.jpg', { type: 'image/jpeg' });
         const inputElement = document.getElementById('face-image-input') as HTMLInputElement;
         if (inputElement) {
           const dataTransfer = new DataTransfer();
           dataTransfer.items.add(noFaceFile);
+          inputElement.files = dataTransfer.files;
+          inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }, 'image/jpeg');
+  };
+
+  // Helper to test multiple faces error validation (2 faces)
+  const triggerMultiFaceImageTest = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 400, 240);
+
+      const drawFace = (cx: number, cy: number) => {
+        // Face skin oval
+        ctx.fillStyle = '#e0ac69';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 38, 52, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes (dark contrast)
+        ctx.fillStyle = '#26140b';
+        ctx.beginPath();
+        ctx.arc(cx - 14, cy - 10, 4.5, 0, Math.PI * 2);
+        ctx.arc(cx + 14, cy - 10, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Mouth
+        ctx.fillStyle = '#991b1b';
+        ctx.beginPath();
+        ctx.arc(cx, cy + 22, 10, 0, Math.PI);
+        ctx.fill();
+      };
+
+      // Two distinct people
+      drawFace(110, 120);
+      drawFace(290, 120);
+    }
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const multiFaceFile = new File([blob], 'two_faces_group.jpg', { type: 'image/jpeg' });
+        const inputElement = document.getElementById('face-image-input') as HTMLInputElement;
+        if (inputElement) {
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(multiFaceFile);
           inputElement.files = dataTransfer.files;
           inputElement.dispatchEvent(new Event('change', { bubbles: true }));
         }
@@ -198,7 +250,14 @@ export const App: React.FC = () => {
                 onClick={triggerNoFaceImageTest}
                 className="px-2.5 py-1 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-500/30 transition-colors cursor-pointer"
               >
-                Trigger No-Face Image (Landscape)
+                Trigger No-Face Image (Back-Facing)
+              </button>
+              <button
+                type="button"
+                onClick={triggerMultiFaceImageTest}
+                className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-white border border-amber-500/30 transition-colors cursor-pointer"
+              >
+                Trigger Multi-Face Image (2 Faces)
               </button>
               <button
                 type="button"

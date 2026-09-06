@@ -1,5 +1,12 @@
 import type { FaceDetectionResult, GoogleReverseResponse, FaceSearchResponse } from '../types/api';
-import { detectFaceFromImage, loadImageElement, generateFaceEmbedding, NO_FACE_ERROR_MESSAGE } from './faceDetectionService';
+import {
+  detectFaceFromImage,
+  loadImageElement,
+  generateFaceEmbedding,
+  generateFaceOnlyHash,
+  NO_FACE_ERROR_MESSAGE,
+  MULTIPLE_FACES_ERROR_MESSAGE,
+} from './faceDetectionService';
 import { getBlockchainHashFromGoogleReverse } from './googleReverseService';
 import { postFaceSearch } from './faceSearchService';
 
@@ -22,15 +29,28 @@ export interface PipelineResult {
 
 /**
  * End-to-End Biometric & Blockchain Verification Pipeline Orchestrator
- * Execution order:
- * Image Upload/Capture → Face Detection → Blockchain Hash → Face Embedding Vector → POST Face Search API
+ *
+ * Strict Execution Flow:
+ * Upload/Capture Image
+ *   ↓
+ * Detect Face
+ *   ↓
+ * Validate Number of Faces (0 -> error & stop; 2+ -> error & stop; 1 -> proceed)
+ *   ↓
+ * Extract Face Mapping / Features & 128D Embedding
+ *   ↓
+ * Generate Face-Only Hash (strictly from face representation, no full-image hashing)
+ *   ↓
+ * Google Reverse API with Face Hash
+ *   ↓
+ * POST Face Search API with Face Hash + Face Embedding Vector
  */
 export async function executeVerificationPipeline(
   file: File,
   precomputedDetection?: FaceDetectionResult,
   onProgress?: (state: PipelineProgressState) => void
 ): Promise<PipelineResult> {
-  // Step 1: Face Detection
+  // Step 1: Face Detection & Strict Face Count Validation
   onProgress?.({
     step: 'detection',
     subStepIndex: 1,
@@ -38,7 +58,8 @@ export async function executeVerificationPipeline(
 
   const detection = precomputedDetection || (await detectFaceFromImage(file));
 
-  if (!detection.hasFace) {
+  // Case 1: No visible face
+  if (!detection.hasFace || detection.faceCount === 0) {
     const errorMsg = detection.error || NO_FACE_ERROR_MESSAGE;
     onProgress?.({
       step: 'error',
@@ -48,39 +69,57 @@ export async function executeVerificationPipeline(
     throw new Error(errorMsg);
   }
 
-  // Step 2: Blockchain Hash via Google Reverse API Integration
+  // Case 2: Multiple faces detected (2+)
+  if (detection.faceCount > 1) {
+    const errorMsg = detection.error || MULTIPLE_FACES_ERROR_MESSAGE;
+    onProgress?.({
+      step: 'error',
+      subStepIndex: 1,
+      error: errorMsg,
+    });
+    throw new Error(errorMsg);
+  }
+
+  // Case 3: Exactly ONE face detected
+  let faceEmbedding = detection.faceEmbeddingVector;
+  let faceHash = detection.faceHash;
+
+  if (!faceEmbedding || faceEmbedding.length === 0 || !faceHash) {
+    try {
+      const img = await loadImageElement(file);
+      faceEmbedding = faceEmbedding || generateFaceEmbedding(img, detection.box);
+      faceHash = faceHash || (await generateFaceOnlyHash(img, detection.box!, faceEmbedding));
+      detection.faceEmbeddingVector = faceEmbedding;
+      detection.faceHash = faceHash;
+    } catch (err) {
+      throw new Error(`Face representation extraction failed: ${(err as Error).message}`);
+    }
+  }
+
+  // Step 2: Blockchain Hash via Google Reverse API using Face-Only Hash
   onProgress?.({
     step: 'reverse',
     subStepIndex: 2,
     detection,
   });
 
-  const reverseData = await getBlockchainHashFromGoogleReverse(file, file.name);
+  const reverseData = await getBlockchainHashFromGoogleReverse(faceHash, file, file.name);
   const blockchainHash = reverseData.blockchainHash;
 
   if (!blockchainHash) {
     throw new Error('Failed to generate blockchain hash from Google Reverse API integration.');
   }
 
-  // Step 3: Face Embedding Vector Generation (128 Dimensions)
+  // Step 3: Face Embedding Vector Confirmation
   onProgress?.({
     step: 'embedding',
     subStepIndex: 1,
     detection,
     reverseData,
+    faceEmbedding,
   });
 
-  let faceEmbedding = detection.faceEmbeddingVector;
-  if (!faceEmbedding || faceEmbedding.length === 0) {
-    try {
-      const img = await loadImageElement(file);
-      faceEmbedding = generateFaceEmbedding(img, detection.box);
-    } catch (err) {
-      throw new Error(`Face embedding generation failed: ${(err as Error).message}`);
-    }
-  }
-
-  // Step 4: POST Face Search API Call
+  // Step 4: POST Face Search API with Face Hash + 128D Embedding Vector
   onProgress?.({
     step: 'search',
     subStepIndex: 3,
@@ -96,7 +135,7 @@ export async function executeVerificationPipeline(
     timestamp: new Date().toISOString(),
   });
 
-  // Pipeline Completion
+  // Complete
   onProgress?.({
     step: 'complete',
     subStepIndex: 3,
