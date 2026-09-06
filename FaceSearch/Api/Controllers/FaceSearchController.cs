@@ -15,6 +15,24 @@ public sealed class FaceSearchController : ControllerBase
         _faceSearchService = faceSearchService;
     }
 
+    [HttpPost("map")]
+    public async Task<IActionResult> FaceMap(
+        [FromBody] FaceMappingRequest request)
+    {
+        // Validate request
+
+        // Store face mapping
+
+        // Store descriptor in vector index
+
+        return Ok(new
+        {
+            success = true,
+            photoId = request.PhotoId,
+            faceCount = request.Faces.Count
+        });
+    }
+
     /// <summary>
     /// Extract face embeddings from an image.
     /// </summary>
