@@ -7,11 +7,14 @@ export interface FaceBox {
 
 export interface FaceDetectionResult {
   hasFace: boolean;
+  faceCount: number; // 0, 1, or 2+
   confidence?: number;
   box?: FaceBox;
+  faces?: FaceBox[];
   error?: string;
   details?: string;
   faceEmbeddingVector?: number[];
+  faceHash?: string; // Deterministic hash of single detected face
 }
 
 export interface GoogleReverseRequest {

@@ -11,12 +11,20 @@ export interface UploadedFaceImage {
   dimensions?: ImageDimensions;
   uploadedAt: Date;
   faceDetection?: FaceDetectionResult;
+  faceHash?: string;
   blockchainHash?: string;
   faceEmbeddingVector?: number[];
 }
 
 export interface ValidationError {
-  type: 'INVALID_TYPE' | 'EXCEEDS_SIZE' | 'CORRUPT_IMAGE' | 'NO_FACE_DETECTED' | 'EMBEDDING_FAILED' | 'UNKNOWN';
+  type:
+    | 'INVALID_TYPE'
+    | 'EXCEEDS_SIZE'
+    | 'CORRUPT_IMAGE'
+    | 'NO_FACE_DETECTED'
+    | 'MULTIPLE_FACES_DETECTED'
+    | 'EMBEDDING_FAILED'
+    | 'UNKNOWN';
   message: string;
   details?: string;
 }

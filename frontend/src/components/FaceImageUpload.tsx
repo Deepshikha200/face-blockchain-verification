@@ -25,6 +25,7 @@ import {
 import {
   detectFaceFromImage,
   NO_FACE_ERROR_MESSAGE,
+  MULTIPLE_FACES_ERROR_MESSAGE,
 } from '../services/faceDetectionService';
 
 const DEFAULT_MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -91,13 +92,16 @@ export const FaceImageUpload: React.FC<FaceImageUploadProps> = ({
       try {
         const dimensions = await getImageDimensions(file);
 
-        // 4. Face Detection: verify image contains a human face before continuing
+        // 4. Face Detection: verify image contains exactly ONE human face before continuing
         const faceResult = await detectFaceFromImage(file);
-        if (!faceResult.hasFace) {
+        if (!faceResult.hasFace || faceResult.faceCount !== 1) {
+          const isMultiple = faceResult.faceCount > 1;
           setError({
-            type: 'NO_FACE_DETECTED',
-            message: NO_FACE_ERROR_MESSAGE,
-            details: faceResult.details || 'Biometric analysis did not locate any facial features or contours in this image.',
+            type: isMultiple ? 'MULTIPLE_FACES_DETECTED' : 'NO_FACE_DETECTED',
+            message: isMultiple ? MULTIPLE_FACES_ERROR_MESSAGE : NO_FACE_ERROR_MESSAGE,
+            details: faceResult.details || (isMultiple
+              ? 'Please upload an image containing only one face.'
+              : 'Biometric analysis did not locate any facial features or contours in this image.'),
           });
 
           // Stop the flow: revoke any existing preview and reset selection
@@ -117,6 +121,8 @@ export const FaceImageUpload: React.FC<FaceImageUploadProps> = ({
           dimensions,
           uploadedAt: new Date(),
           faceDetection: faceResult,
+          faceHash: faceResult.faceHash,
+          blockchainHash: faceResult.faceHash,
           faceEmbeddingVector: faceResult.faceEmbeddingVector,
         };
 

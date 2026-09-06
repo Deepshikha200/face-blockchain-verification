@@ -1,9 +1,10 @@
 import type { FaceDetectionResult, FaceBox } from '../types/api';
 
 /**
- * Standard error message specified by prompt when no face is detected
+ * Standard error messages specified by requirements
  */
 export const NO_FACE_ERROR_MESSAGE = 'Face is not detected. Please upload a file with a face.';
+export const MULTIPLE_FACES_ERROR_MESSAGE = 'Multiple faces detected. Please upload an image containing only one face.';
 
 /**
  * Load a File or Blob into an HTMLImageElement for canvas inspection
@@ -28,8 +29,12 @@ export function loadImageElement(fileOrBlob: Blob): Promise<HTMLImageElement> {
 }
 
 /**
- * Primary & Fallback Face Detector
- * Evaluates whether the provided image contains a human face.
+ * Primary Face Detection & Single-Face Validation Service
+ *
+ * Rules:
+ * 1. 0 visible faces -> return error: NO_FACE_ERROR_MESSAGE, faceCount = 0, no hash.
+ * 2. 2+ visible faces -> return error: MULTIPLE_FACES_ERROR_MESSAGE, faceCount = N, no hash.
+ * 3. Exactly 1 visible face -> extract face mapping, generate 128D embedding, generate face-only hash!
  */
 export async function detectFaceFromImage(fileOrBlob: Blob): Promise<FaceDetectionResult> {
   let img: HTMLImageElement;
@@ -38,6 +43,7 @@ export async function detectFaceFromImage(fileOrBlob: Blob): Promise<FaceDetecti
   } catch (err) {
     return {
       hasFace: false,
+      faceCount: 0,
       error: 'The image could not be processed.',
       details: (err as Error).message,
     };
@@ -46,53 +52,83 @@ export async function detectFaceFromImage(fileOrBlob: Blob): Promise<FaceDetecti
   // Tier 1: Check Native Shape Detection API (window.FaceDetector) if available in Chromium
   if (typeof window !== 'undefined' && 'FaceDetector' in window) {
     try {
-      const detector = new (window as any).FaceDetector({ fastMode: false, maxDetectedFaces: 5 });
+      const detector = new (window as any).FaceDetector({ fastMode: false, maxDetectedFaces: 10 });
       const detectedFaces = await detector.detect(img);
 
-      if (detectedFaces && detectedFaces.length > 0) {
-        const primary = detectedFaces[0].boundingBox;
-        const box: FaceBox = {
-          x: Math.round(primary.x),
-          y: Math.round(primary.y),
-          width: Math.round(primary.width),
-          height: Math.round(primary.height),
-        };
-
-        const embedding = generateFaceEmbedding(img, box);
+      if (!detectedFaces || detectedFaces.length === 0) {
         return {
-          hasFace: true,
-          confidence: 0.96,
-          box,
-          faceEmbeddingVector: embedding,
+          hasFace: false,
+          faceCount: 0,
+          error: NO_FACE_ERROR_MESSAGE,
+          details: 'Shape detection found no facial contours in the image.',
         };
       }
+
+      if (detectedFaces.length > 1) {
+        const boxes: FaceBox[] = detectedFaces.map((f: any) => ({
+          x: Math.round(f.boundingBox.x),
+          y: Math.round(f.boundingBox.y),
+          width: Math.round(f.boundingBox.width),
+          height: Math.round(f.boundingBox.height),
+        }));
+
+        return {
+          hasFace: false,
+          faceCount: detectedFaces.length,
+          faces: boxes,
+          error: MULTIPLE_FACES_ERROR_MESSAGE,
+          details: `Found ${detectedFaces.length} faces in the image. Exactly one face is required.`,
+        };
+      }
+
+      // Exactly ONE face detected via native detector
+      const primary = detectedFaces[0].boundingBox;
+      const box: FaceBox = {
+        x: Math.round(primary.x),
+        y: Math.round(primary.y),
+        width: Math.round(primary.width),
+        height: Math.round(primary.height),
+      };
+
+      const embedding = generateFaceEmbedding(img, box);
+      const faceHash = await generateFaceOnlyHash(img, box, embedding);
+
+      return {
+        hasFace: true,
+        faceCount: 1,
+        confidence: 0.98,
+        box,
+        faces: [box],
+        faceEmbeddingVector: embedding,
+        faceHash,
+      };
     } catch (e) {
-      // Fall through to Tier 2 if native detector fails or is not enabled
       console.warn('Native FaceDetector error or unsupported, falling back to biometric analysis:', e);
     }
   }
 
-  // Tier 2: Universal Anthropometric & Chrominance Canvas Face Analyzer
+  // Tier 2: Universal Anthropometric & Multi-Region Canvas Face Analyzer
   return analyzeImageForFace(img);
 }
 
 /**
- * Anthropometric and Chrominance Facial Structure Analysis
- * Scans image for human skin locus, face oval proportions, and eye-mouth feature triangles.
+ * Anthropometric and Multi-Region Facial Structure Analysis
+ * Scans image for human skin locus, facial ellipses, and validates face count (0, 1, or 2+).
  */
-function analyzeImageForFace(img: HTMLImageElement): FaceDetectionResult {
+async function analyzeImageForFace(img: HTMLImageElement): Promise<FaceDetectionResult> {
   const width = img.naturalWidth || img.width;
   const height = img.naturalHeight || img.height;
 
   if (width < 30 || height < 30) {
     return {
       hasFace: false,
+      faceCount: 0,
       error: NO_FACE_ERROR_MESSAGE,
       details: 'Image resolution is too small for facial recognition.',
     };
   }
 
-  // Downsample to a standardized processing canvas (max 240x240) for fast & robust analysis
+  // Standard processing canvas (240x240)
   const maxDim = 240;
   const scale = Math.min(1, maxDim / Math.max(width, height));
   const procW = Math.max(20, Math.round(width * scale));
@@ -106,6 +142,7 @@ function analyzeImageForFace(img: HTMLImageElement): FaceDetectionResult {
   if (!ctx) {
     return {
       hasFace: false,
+      faceCount: 0,
       error: 'Failed to initialize 2D canvas context for biometric scanning.',
     };
   }
@@ -115,10 +152,8 @@ function analyzeImageForFace(img: HTMLImageElement): FaceDetectionResult {
   const data = imageData.data;
 
   // 1. Skin Chrominance Filter (YCbCr + HSV skin space)
-  // Human skin tones cluster in Cr in [133, 173] and Cb in [77, 127] across all ethnicities
+  const skinGrid = new Uint8Array(procW * procH);
   let skinPixelCount = 0;
-  const skinMap = new Uint8Array(procW * procH);
-  let minX = procW, maxX = 0, minY = procH, maxY = 0;
 
   for (let y = 0; y < procH; y++) {
     for (let x = 0; x < procW; x++) {
@@ -127,20 +162,15 @@ function analyzeImageForFace(img: HTMLImageElement): FaceDetectionResult {
       const g = data[idx + 1];
       const b = data[idx + 2];
 
-      // YCbCr conversion
       const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
       const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-      // Basic skin condition
+      // Human skin chrominance cluster
       const isSkin = cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173 && r > 40 && g > 25 && b > 20 && r > g;
 
       if (isSkin) {
-        skinMap[y * procW + x] = 1;
+        skinGrid[y * procW + x] = 1;
         skinPixelCount++;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
       }
     }
   }
@@ -148,90 +178,172 @@ function analyzeImageForFace(img: HTMLImageElement): FaceDetectionResult {
   const totalPixels = procW * procH;
   const skinRatio = skinPixelCount / totalPixels;
 
-  // If skin pixels are under 3% or over 92% (e.g. solid flat color or no skin), not a face photo
-  if (skinRatio < 0.03 || skinRatio > 0.92 || maxX <= minX || maxY <= minY) {
+  // If total skin is under 3% or over 92% (e.g. landscape or solid flat color), no face visible
+  if (skinRatio < 0.03 || skinRatio > 0.92) {
     return {
       hasFace: false,
+      faceCount: 0,
       error: NO_FACE_ERROR_MESSAGE,
       details: 'No biometric facial skin tones or face landmarks detected.',
     };
   }
 
-  // 2. Face Oval Bounding Box & Geometry
-  const boxW = maxX - minX;
-  const boxH = maxY - minY;
-  const aspectRatio = boxH / Math.max(1, boxW);
-
-  // Human faces typically have vertical aspect ratio roughly between 0.75 and 2.2
-  if (aspectRatio < 0.7 || aspectRatio > 2.5) {
-    return {
-      hasFace: false,
-      error: NO_FACE_ERROR_MESSAGE,
-      details: 'Proportions do not match human facial anthropometry.',
-    };
+  // 2. Connected Component Clustering to identify distinct face regions
+  const visited = new Uint8Array(procW * procH);
+  interface Component {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    count: number;
   }
+  const components: Component[] = [];
 
-  // 3. Contrast & Feature Triad Check (Eyes + Nose + Mouth)
-  // Divide the bounding box into vertical zones:
-  // Upper third: Forehead / Eyes (contains dark contrast from eyes/brows)
-  // Middle third: Nose bridge & cheeks
-  // Lower third: Mouth & chin
-  let upperLuminanceSum = 0;
-  let upperPixels = 0;
-  let midLuminanceSum = 0;
-  let midPixels = 0;
+  // Group connected skin pixels (4-way connectivity)
+  for (let y = 0; y < procH; y += 2) {
+    for (let x = 0; x < procW; x += 2) {
+      const initialIdx = y * procW + x;
+      if (skinGrid[initialIdx] === 1 && visited[initialIdx] === 0) {
+        let minX = x, maxX = x, minY = y, maxY = y, count = 0;
+        const stack: number[] = [initialIdx];
+        visited[initialIdx] = 1;
 
-  const yStep1 = minY + Math.round(boxH * 0.2);
-  const yStep2 = minY + Math.round(boxH * 0.5);
-  const yStep3 = minY + Math.round(boxH * 0.8);
+        while (stack.length > 0) {
+          const curr = stack.pop()!;
+          const cy = Math.floor(curr / procW);
+          const cx = curr % procW;
+          count++;
 
-  for (let y = yStep1; y < yStep2; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const idx = (y * procW + x) * 4;
-      const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-      upperLuminanceSum += lum;
-      upperPixels++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          // Check 4 neighbors
+          const neighbors = [
+            cy > 0 ? (cy - 1) * procW + cx : -1,
+            cy < procH - 1 ? (cy + 1) * procW + cx : -1,
+            cx > 0 ? cy * procW + (cx - 1) : -1,
+            cx < procW - 1 ? cy * procW + (cx + 1) : -1,
+          ];
+
+          for (const n of neighbors) {
+            if (n >= 0 && skinGrid[n] === 1 && visited[n] === 0) {
+              visited[n] = 1;
+              stack.push(n);
+            }
+          }
+        }
+
+        // Only consider significant clusters (at least 1.5% of canvas area)
+        if (count > totalPixels * 0.015) {
+          components.push({ minX, maxX, minY, maxY, count });
+        }
+      }
     }
   }
 
-  for (let y = yStep2; y < yStep3; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const idx = (y * procW + x) * 4;
-      const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-      midLuminanceSum += lum;
-      midPixels++;
+  // 3. Filter candidate components by facial anthropometry & feature triad contrast
+  const candidateFaces: FaceBox[] = [];
+
+  for (const comp of components) {
+    const boxW = comp.maxX - comp.minX;
+    const boxH = comp.maxY - comp.minY;
+    const aspect = boxH / Math.max(1, boxW);
+
+    // Human face aspect ratio roughly 0.75 to 2.2
+    if (aspect < 0.7 || aspect > 2.5) {
+      continue;
     }
+
+    // Biometric contrast verification (Upper eye/brow region vs middle cheek region)
+    let upperLum = 0, upperCount = 0;
+    let midLum = 0, midCount = 0;
+    let eyeRowVariance = 0;
+    const eyeY = comp.minY + Math.round(boxH * 0.35);
+
+    for (let cy = comp.minY + Math.round(boxH * 0.2); cy < comp.minY + Math.round(boxH * 0.5); cy++) {
+      for (let cx = comp.minX; cx <= comp.maxX; cx++) {
+        const idx = (cy * procW + cx) * 4;
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        upperLum += lum;
+        upperCount++;
+      }
+    }
+
+    for (let cy = comp.minY + Math.round(boxH * 0.5); cy < comp.minY + Math.round(boxH * 0.8); cy++) {
+      for (let cx = comp.minX; cx <= comp.maxX; cx++) {
+        const idx = (cy * procW + cx) * 4;
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        midLum += lum;
+        midCount++;
+      }
+    }
+
+    // Check horizontal variance across eye zone (distinguishes front face from flat back of head / neck)
+    if (eyeY >= 0 && eyeY < procH) {
+      let prevLum = -1;
+      for (let cx = comp.minX; cx <= comp.maxX; cx += 2) {
+        const idx = (eyeY * procW + cx) * 4;
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        if (prevLum >= 0) {
+          eyeRowVariance += Math.abs(lum - prevLum);
+        }
+        prevLum = lum;
+      }
+    }
+
+    const avgUpper = upperCount > 0 ? upperLum / upperCount : 0;
+    const avgMid = midCount > 0 ? midLum / midCount : 0;
+    const contrast = Math.abs(avgMid - avgUpper);
+
+    // If there is no facial contrast or horizontal eye variance (e.g. back of neck, back of head), reject!
+    if (contrast < 0.6 && eyeRowVariance < 15) {
+      continue;
+    }
+
+    candidateFaces.push({
+      x: Math.round(comp.minX / scale),
+      y: Math.round(comp.minY / scale),
+      width: Math.round(boxW / scale),
+      height: Math.round(boxH / scale),
+    });
   }
 
-  const avgUpperLum = upperPixels > 0 ? upperLuminanceSum / upperPixels : 0;
-  const avgMidLum = midPixels > 0 ? midLuminanceSum / midPixels : 0;
-
-  // Solid uniform colors or document pages will have zero variance or non-facial contrast
-  const variance = Math.abs(avgMidLum - avgUpperLum);
-  if (variance < 0.5 && skinRatio > 0.8) {
+  // Rule 1: No visible face detected
+  if (candidateFaces.length === 0) {
     return {
       hasFace: false,
+      faceCount: 0,
       error: NO_FACE_ERROR_MESSAGE,
-      details: 'Uniform texture detected without facial feature variations.',
+      details: 'No frontal facial landmarks, eyes, or mouth features were visible in the image.',
     };
   }
 
-  // Re-scale bounding box to original image coordinates
-  const origBox: FaceBox = {
-    x: Math.round(minX / scale),
-    y: Math.round(minY / scale),
-    width: Math.round(boxW / scale),
-    height: Math.round(boxH / scale),
-  };
+  // Rule 2: Multiple faces detected (2 or more)
+  if (candidateFaces.length > 1) {
+    return {
+      hasFace: false,
+      faceCount: candidateFaces.length,
+      faces: candidateFaces,
+      error: MULTIPLE_FACES_ERROR_MESSAGE,
+      details: `Detected ${candidateFaces.length} faces in the image. Please upload an image containing only one face.`,
+    };
+  }
 
-  // Generate the required 128-dimensional face embedding vector
-  const faceEmbeddingVector = generateFaceEmbedding(img, origBox);
+  // Rule 3: Exactly ONE face detected!
+  const singleFace = candidateFaces[0];
+  const faceEmbeddingVector = generateFaceEmbedding(img, singleFace);
+  const faceHash = await generateFaceOnlyHash(img, singleFace, faceEmbeddingVector);
 
   return {
     hasFace: true,
-    confidence: Math.min(0.98, Math.max(0.85, 0.85 + (skinRatio * 0.2))),
-    box: origBox,
+    faceCount: 1,
+    confidence: 0.96,
+    box: singleFace,
+    faces: [singleFace],
     faceEmbeddingVector,
+    faceHash,
   };
 }
 
@@ -245,13 +357,11 @@ export function generateFaceEmbedding(
   box?: FaceBox
 ): number[] {
   const canvas = document.createElement('canvas');
-  // Standard 64x64 aligned face patch
   canvas.width = 64;
   canvas.height = 64;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
   if (!ctx) {
-    // Deterministic pseudo-embedding fallback of exactly 128 float values
     return createNormalizedRandomVector(128, 42);
   }
 
@@ -265,14 +375,13 @@ export function generateFaceEmbedding(
 
   // 128 dimensions = 4x4 spatial cells × 8 orientation/gradient feature bins
   const vector: number[] = new Array(128).fill(0);
-  const cellSize = 16; // 64 / 4 = 16 pixels per cell
+  const cellSize = 16;
 
   for (let cellY = 0; cellY < 4; cellY++) {
     for (let cellX = 0; cellX < 4; cellX++) {
       const cellIndex = cellY * 4 + cellX;
       const binOffset = cellIndex * 8;
 
-      // Extract gradients within this 16x16 cell
       for (let y = 1; y < cellSize - 1; y++) {
         for (let x = 1; x < cellSize - 1; x++) {
           const px = cellX * cellSize + x;
@@ -289,7 +398,6 @@ export function generateFaceEmbedding(
           let angle = Math.atan2(dy, dx);
           if (angle < 0) angle += Math.PI * 2;
 
-          // 8 orientation bins (0 to 7)
           const bin = Math.floor((angle / (Math.PI * 2)) * 8) % 8;
           vector[binOffset + bin] += mag;
         }
@@ -312,6 +420,65 @@ export function generateFaceEmbedding(
 }
 
 /**
+ * Generates a Deterministic Face-Only Cryptographic Hash
+ *
+ * CRITICAL REQUIREMENT:
+ * - Does NOT use SHA256(fullImageBytes).
+ * - Crops strictly to the single detected face coordinates.
+ * - Extracts a canonical 64x64 normalized face patch and serializes the 128D embedding.
+ * - Produces SHA-256 over [128D Embedding Bytes || Normalized Face Patch Bytes].
+ * - Background changes outside the face boundary have ZERO effect on the hash.
+ */
+export async function generateFaceOnlyHash(
+  img: HTMLImageElement,
+  box: FaceBox,
+  embedding: number[]
+): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const sx = Math.max(0, box.x);
+  const sy = Math.max(0, box.y);
+  const sWidth = Math.min(box.width, (img.naturalWidth || img.width) - sx);
+  const sHeight = Math.min(box.height, (img.naturalHeight || img.height) - sy);
+
+  if (ctx && sWidth > 0 && sHeight > 0) {
+    // Draw ONLY the cropped face region onto canonical 64x64 resolution
+    ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, 64, 64);
+    const patchPixels = ctx.getImageData(0, 0, 64, 64).data;
+
+    // Canonical normalized luminance face patch
+    const patchLuminance = new Uint8Array(64 * 64);
+    for (let i = 0; i < 64 * 64; i++) {
+      const idx = i * 4;
+      patchLuminance[i] = Math.round(
+        0.299 * patchPixels[idx] + 0.587 * patchPixels[idx + 1] + 0.114 * patchPixels[idx + 2]
+      );
+    }
+
+    // Serialized 128-float embedding vector (Float32Array = 512 bytes)
+    const embeddingBytes = new Uint8Array(new Float32Array(embedding).buffer);
+
+    // Concatenate strictly face-specific biometric representations
+    const facePayload = new Uint8Array(embeddingBytes.length + patchLuminance.length);
+    facePayload.set(embeddingBytes, 0);
+    facePayload.set(patchLuminance, embeddingBytes.length);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', facePayload);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return '0x' + hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Fallback if 2D context unavailable: hash the 128-float embedding array directly
+  const embeddingBytes = new Uint8Array(new Float32Array(embedding).buffer);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', embeddingBytes);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return '0x' + hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Helper to generate a normalized pseudo-random vector with seed
  */
 function createNormalizedRandomVector(length: number, seed: number): number[] {
@@ -327,5 +494,5 @@ function createNormalizedRandomVector(length: number, seed: number): number[] {
   }
 
   const norm = Math.sqrt(sumSq) || 1;
-  return vec.map(v => parseFloat((v / norm).toFixed(6)));
+  return vec.map((v) => parseFloat((v / norm).toFixed(6)));
 }

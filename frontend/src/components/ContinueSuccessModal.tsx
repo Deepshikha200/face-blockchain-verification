@@ -39,8 +39,10 @@ export const ContinueSuccessModal: React.FC<ContinueSuccessModalProps> = ({
 
   const hash =
     overrideHash ||
+    image?.faceDetection?.faceHash ||
+    image?.faceHash ||
     image?.blockchainHash ||
-    (image?.file ? 'Ready for Google Reverse API blockchain hash...' : 'Computing SHA-256 fingerprint...');
+    'Computing face-only biometric hash...';
 
   const handleClose = () => {
     setOverrideHash(null);
@@ -148,8 +150,8 @@ export const ContinueSuccessModal: React.FC<ContinueSuccessModalProps> = ({
               <div className="flex items-center gap-1.5 text-emerald-400 font-medium text-[11px]">
                 <Fingerprint className="w-3.5 h-3.5" />
                 <span>
-                  {image.faceDetection?.hasFace
-                    ? 'Biometric face detected (128D embedding vector ready)'
+                  {image.faceDetection?.hasFace && image.faceDetection.faceCount === 1
+                    ? 'Single biometric face verified (128D embedding & face hash generated)'
                     : 'Biometric scan encoding validated'}
                 </span>
               </div>
@@ -161,7 +163,7 @@ export const ContinueSuccessModal: React.FC<ContinueSuccessModalProps> = ({
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-1.5 text-indigo-300 font-medium">
                 <Hash className="w-3.5 h-3.5" />
-                <span>Image SHA-256 Digest (Blockchain Payload):</span>
+                <span>Face-Only Cryptographic Hash (Blockchain Payload):</span>
               </div>
               <span className="text-[10px] text-slate-500 font-mono">Keccak-ready</span>
             </div>
