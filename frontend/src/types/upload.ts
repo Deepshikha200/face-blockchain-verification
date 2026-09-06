@@ -3,15 +3,20 @@ export interface ImageDimensions {
   height: number;
 }
 
+import type { FaceDetectionResult } from './api';
+
 export interface UploadedFaceImage {
   file: File;
   previewUrl: string;
   dimensions?: ImageDimensions;
   uploadedAt: Date;
+  faceDetection?: FaceDetectionResult;
+  blockchainHash?: string;
+  faceEmbeddingVector?: number[];
 }
 
 export interface ValidationError {
-  type: 'INVALID_TYPE' | 'EXCEEDS_SIZE' | 'CORRUPT_IMAGE' | 'UNKNOWN';
+  type: 'INVALID_TYPE' | 'EXCEEDS_SIZE' | 'CORRUPT_IMAGE' | 'NO_FACE_DETECTED' | 'EMBEDDING_FAILED' | 'UNKNOWN';
   message: string;
   details?: string;
 }
