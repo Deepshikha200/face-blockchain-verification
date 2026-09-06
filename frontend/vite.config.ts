@@ -98,5 +98,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     apiMiddlewarePlugin(),
-  ],
+    ],
+    server: {
+        port: 5173,
+        open: true,
+    },
 })
