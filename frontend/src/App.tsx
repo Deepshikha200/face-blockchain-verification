@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { VerificationPipelineHeader } from './components/VerificationPipelineHeader';
 import { FaceImageUpload } from './components/FaceImageUpload';
 import { ContinueSuccessModal } from './components/ContinueSuccessModal';
-import type { UploadedFaceImage } from './types/upload';
+import type { UploadedFaceImage, PipelineStep } from './types/upload';
 import { Shield, Sparkles, CheckCircle, Code, Layers, FileWarning } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [currentImage, setCurrentImage] = useState<UploadedFaceImage | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>('upload');
 
   // Sample face portraits for quick testing in browser
   const sampleFaces = [
@@ -80,6 +81,42 @@ export const App: React.FC = () => {
     }
   };
 
+  // Helper to test no-face image error validation
+  const triggerNoFaceImageTest = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      // Blue sky gradient
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, 140);
+      skyGrad.addColorStop(0, '#0284c7');
+      skyGrad.addColorStop(1, '#7dd3fc');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, 320, 140);
+
+      // Green grass landscape
+      const grassGrad = ctx.createLinearGradient(0, 140, 0, 240);
+      grassGrad.addColorStop(0, '#15803d');
+      grassGrad.addColorStop(1, '#166534');
+      ctx.fillStyle = grassGrad;
+      ctx.fillRect(0, 140, 320, 100);
+    }
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const noFaceFile = new File([blob], 'scenery_no_face.jpg', { type: 'image/jpeg' });
+        const inputElement = document.getElementById('face-image-input') as HTMLInputElement;
+        if (inputElement) {
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(noFaceFile);
+          inputElement.files = dataTransfer.files;
+          inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }, 'image/jpeg');
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
       {/* Dynamic Background Glows */}
@@ -93,7 +130,7 @@ export const App: React.FC = () => {
       <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex-1 flex flex-col">
         {/* Verification Pipeline Stepper Header */}
         <VerificationPipelineHeader
-          currentStep="upload"
+          currentStep={pipelineStep}
           isImageUploaded={currentImage !== null}
         />
 
@@ -106,6 +143,9 @@ export const App: React.FC = () => {
             }}
             onImageSelect={(data) => {
               setCurrentImage(data);
+              if (!data) {
+                setPipelineStep('upload');
+              }
             }}
             maxSizeBytes={10 * 1024 * 1024} // 10MB
             acceptedFormats={['image/jpeg', 'image/png', 'image/jpg']}
@@ -155,6 +195,13 @@ export const App: React.FC = () => {
               </span>
               <button
                 type="button"
+                onClick={triggerNoFaceImageTest}
+                className="px-2.5 py-1 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-500/30 transition-colors cursor-pointer"
+              >
+                Trigger No-Face Image (Landscape)
+              </button>
+              <button
+                type="button"
                 onClick={triggerInvalidFileTest}
                 className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
@@ -175,7 +222,10 @@ export const App: React.FC = () => {
         <ContinueSuccessModal
           image={currentImage}
           isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
+          onClose={() => {
+            setIsModalOpen(false);
+          }}
+          onStepChange={(step) => setPipelineStep(step)}
         />
       </main>
 

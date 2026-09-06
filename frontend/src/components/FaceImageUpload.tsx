@@ -22,6 +22,10 @@ import {
   isValidImageType,
   getImageDimensions,
 } from '../utils/formatters';
+import {
+  detectFaceFromImage,
+  NO_FACE_ERROR_MESSAGE,
+} from '../services/faceDetectionService';
 
 const DEFAULT_MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 const DEFAULT_FORMATS = ['image/jpeg', 'image/png', 'image/jpg'];
@@ -86,6 +90,25 @@ export const FaceImageUpload: React.FC<FaceImageUploadProps> = ({
       setIsLoading(true);
       try {
         const dimensions = await getImageDimensions(file);
+
+        // 4. Face Detection: verify image contains a human face before continuing
+        const faceResult = await detectFaceFromImage(file);
+        if (!faceResult.hasFace) {
+          setError({
+            type: 'NO_FACE_DETECTED',
+            message: NO_FACE_ERROR_MESSAGE,
+            details: faceResult.details || 'Biometric analysis did not locate any facial features or contours in this image.',
+          });
+
+          // Stop the flow: revoke any existing preview and reset selection
+          if (uploadedImage?.previewUrl) {
+            URL.revokeObjectURL(uploadedImage.previewUrl);
+          }
+          setUploadedImage(null);
+          onImageSelect?.(null);
+          return;
+        }
+
         const previewUrl = URL.createObjectURL(file);
 
         const newImage: UploadedFaceImage = {
@@ -93,6 +116,8 @@ export const FaceImageUpload: React.FC<FaceImageUploadProps> = ({
           previewUrl,
           dimensions,
           uploadedAt: new Date(),
+          faceDetection: faceResult,
+          faceEmbeddingVector: faceResult.faceEmbeddingVector,
         };
 
         // Revoke previous URL if any
