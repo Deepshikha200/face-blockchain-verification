@@ -30,7 +30,7 @@ public sealed class FaceSearchController : ControllerBase
             success = true,
             photoId = request.PhotoId,
             faceCount = request.Faces.Count
-        });
+        }); 
     }
 
     /// <summary>
