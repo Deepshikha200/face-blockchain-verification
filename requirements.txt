@@ -20,7 +20,7 @@ GitHub repo required Your full source code must be in a GitHub repo, with a READ
 Submission requirements
 GitHub repo link
 A screen recording of the working project (no live working link required)
-Submission form link : https://forms.gle/oZbQGuwiNeHVcHWo8 
+Submission form link : https://forms.gle/
 No resubmissions will be allowed — submit only when your build is final.
 Screen recording
 Record your screen showing the pipeline working end to end: face scan → social post found → blockchain upload/verification.
