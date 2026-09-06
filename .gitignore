@@ -4,3 +4,5 @@
 
 /.vs
 /app/Controller/obj
+/FaceSearch/bin/Debug/net8.0
+/FaceSearch/obj

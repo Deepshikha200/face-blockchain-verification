@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37516.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FaceSearch", "FaceSearch\FaceSearch.csproj", "{EFF18AEA-288C-39CE-B18C-476058DB9705}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EFF18AEA-288C-39CE-B18C-476058DB9705}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EFF18AEA-288C-39CE-B18C-476058DB9705}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EFF18AEA-288C-39CE-B18C-476058DB9705}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EFF18AEA-288C-39CE-B18C-476058DB9705}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C4CE4EEE-06BF-4E04-A71A-0B5270F06855}
+	EndGlobalSection
+EndGlobal
